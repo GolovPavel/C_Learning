@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/wait.h>
+
 #define PROC_COUNT 40
 
 int main(){

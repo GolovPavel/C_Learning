@@ -26,7 +26,7 @@ void write_log(FILE*, char[]);
 int main(int argc, char* argv[]){
 
     if(argc < 2) {
-        printf("Please, type name of log file as second arg.");
+        printf("Please, type name of log file as second arg.\n");
         exit(1);
     }
 
@@ -134,7 +134,8 @@ int main(int argc, char* argv[]){
             /* If error occured or socket is not ready for read */
             if((events[i].events & EPOLLERR)
                 || (events[i].events & EPOLLHUP)
-                || (!(events[i].events & EPOLLIN))){
+                || ((!(events[i].events & EPOLLIN))
+                && (!(events[i].events & EPOLLOUT)))) {
                 printf("Error ocured with socket %d", events[i].data.fd);
                 close(events[i].data.fd);
                 continue;
@@ -179,7 +180,7 @@ int main(int argc, char* argv[]){
                         port, sizeof(port),
                         NI_NUMERICHOST | NI_NUMERICSERV);
                     if(status == 0) {
-                        printf("Client with fd %d and address %s:%s connected",
+                        printf("Client with fd %d and address %s:%s connected\n",
                             csock, host, port);
                     }
 
@@ -191,7 +192,7 @@ int main(int argc, char* argv[]){
                     }
 
                     event.data.fd = csock;
-                    event.events = EPOLLIN;
+                    event.events = EPOLLIN | EPOLLOUT;
 
                     status = epoll_ctl(efd, EPOLL_CTL_ADD, csock, &event);
                     if(status == -1){
@@ -201,23 +202,47 @@ int main(int argc, char* argv[]){
                 }
                 continue;
 
-            } else{
+            } else if(events[i].events & EPOLLIN){
 
-                /* User write data => we should read it and do anything */
+                /* User write data => we should read it and send to everyone, except this user */
+
+                int clfd = events[i].data.fd;
 
                 while(1) {
                     char buf[BUFFERSIZE];
-                    ssize_t count;
+                    int count;
 
-                    count = recv(events[i].data.fd, buf, sizeof(buf), 0);
+                    count = recv(clfd, buf, sizeof(buf), 0);
 
+                    /* Some error? */
                     if(count == -1) {
+                        /* errno == EAGAIN means, that we don't have any data */
                         if(errno != EAGAIN){
                             perror("Problems while reading from client socket");
-                            close(events[i].data.fd);
-                        }
-                        else{
+                            close(clfd);
+                        } else{
                             break;
+                        }
+                    } else if(count == 0) {
+                        /* Client shotdown */
+                        close(clfd);
+                    }
+
+                    /* Write data to other sockets */
+                    int j, outfd;
+
+                    for(j = 0; j < n; j++){
+                        if((events[j].data.fd == clfd)) {
+                            continue;
+                        }
+
+                        outfd = events[j].data.fd;
+
+                        status = send(outfd, buf, count, 0);
+
+                        if(status == -1){
+                            perror("Could not send data to socket");
+                            close(outfd);
                         }
                     }
 

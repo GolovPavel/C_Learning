@@ -10,6 +10,9 @@
 #include <sys/epoll.h>
 #include <errno.h>
 #include <netdb.h>
+#include <time.h>
+#include <signal.h>
+#include <sys/signalfd.h>
 
 #define MAXCONN 100
 #define MAXEVENTS 64
@@ -17,13 +20,55 @@
 #define MAXPORTSIZE 16
 #define BUFFERSIZE 4096
 
-int main(){
+
+void write_log(FILE*, char[]);
+
+int main(int argc, char* argv[]){
+
+    if(argc < 2) {
+        printf("Please, type name of log file as second arg.");
+        exit(1);
+    }
+
+    char* filename = argv[1];
+
+    int sigfd;
+    sigset_t mask;
+
     int ssock;
     struct sockaddr_in servaddr;
 
     int efd;
     struct epoll_event event;
     struct epoll_event *events;
+
+    int status;
+
+    /* Open file for logging */
+    FILE* fm = fopen(filename, "a+");
+
+    /* Signal processor */
+    status = sigemptyset(&mask);
+    if(status < 0){
+        perror("Sigemptyset error");
+        exit(1);
+    }
+    status = sigaddset(&mask, SIGTSTP);
+    if(status < 0){
+        perror("Sigaddset error");
+        exit(1);
+    }
+    status = sigprocmask(SIG_BLOCK, &mask, NULL);
+    if(status < 0){
+        perror("Sigprocmask error");
+        exit(1);
+    }
+
+    sigfd = signalfd(-1, &mask, 0);
+    if(sigfd < 0){
+        perror("Signalfd error");
+        exit(1);
+    }
 
     /* Creating server socket */
     ssock = socket(AF_INET, SOCK_STREAM, 0);
@@ -33,7 +78,7 @@ int main(){
     }
 
     /*Make socket NON-BLOCKIN */
-    int status = fcntl(ssock, F_SETFL, fcntl(ssock, F_GETFL, 0) | O_NONBLOCK);
+    status = fcntl(ssock, F_SETFL, fcntl(ssock, F_GETFL, 0) | O_NONBLOCK);
     if (status == -1){
       perror("Could not make server socket non-blocking");
       exit(1);
@@ -58,16 +103,24 @@ int main(){
 
     /* Create and config epool */
     efd = epoll_create1(0);
+
     event.data.fd = ssock;
     event.events = EPOLLIN;
-
     status = epoll_ctl(efd, EPOLL_CTL_ADD, ssock, &event);
     if(status == -1){
         perror("Could not server ctl epoll");
         exit(1);
     }
 
+    event.data.fd = sigfd;
+    event.events = EPOLLIN;
+    status = epoll_ctl(efd, EPOLL_CTL_ADD, sigfd, &event);
+    if(status == -1){
+        perror("Could not signal ctl epoll");
+    }
+
     events = calloc(MAXEVENTS, sizeof(event));
+    printf("Server started. Use Ctrl+z to stop server.\n");
 
     /* Server loop */
     while(1){
@@ -85,7 +138,16 @@ int main(){
                 printf("Error ocured with socket %d", events[i].data.fd);
                 close(events[i].data.fd);
                 continue;
-            } else if (ssock == events[i].data.fd) {
+            } else if(sigfd == events[i].data.fd) {
+                /* Ctrl + z => terminate programm */
+                printf("\nServer stoped\n");
+                free(events);
+                close(ssock);
+                close(sigfd);
+                close(efd);
+                fclose(fm);
+                exit(0);
+            } else if(ssock == events[i].data.fd) {
                 /* Event occured on listener socket => new connection[s] recieved */
 
                 /* Get all new connections */
@@ -159,18 +221,16 @@ int main(){
                         }
                     }
 
-                    write(1, buf, count);
+                    write_log(fm, buf);
                 }
-
-
-
             }
         }
     }
+}
 
-    free(events);
-    close(ssock);
-    close(efd);
+void write_log(FILE* fm, char msg[]){
+    long int ttime;
 
-    exit(0);
+    ttime = time(NULL);
+    fprintf(fm, "%s%s\n", ctime(&ttime), msg);
 }

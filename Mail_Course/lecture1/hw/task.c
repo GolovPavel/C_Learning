@@ -7,7 +7,6 @@
 
 #define MAXLINE 1024
 
-void fprintend(FILE*, char*);
 void getlstln(FILE*, char*);
 
 

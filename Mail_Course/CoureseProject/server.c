@@ -15,7 +15,7 @@
 #define MAXEVENTS 64
 #define MAXHOSTSIZE 32
 #define MAXPORTSIZE 16
-
+#define BUFFERSIZE 4096
 
 int main(){
     int ssock;
@@ -82,7 +82,7 @@ int main(){
             if((events[i].events & EPOLLERR)
                 || (events[i].events & EPOLLHUP)
                 || (!(events[i].events & EPOLLIN))){
-                printf("Error ocured with socket %d" % events[i].data.fd);
+                printf("Error ocured with socket %d", events[i].data.fd);
                 close(events[i].data.fd);
                 continue;
             } else if (ssock == events[i].data.fd) {
@@ -91,12 +91,15 @@ int main(){
                 /* Get all new connections */
                 while(1){
                     struct sockaddr_in clientaddr;
+                    socklen_t in_len;
                     int csock;
                     char port[MAXPORTSIZE];
                     char host[MAXHOSTSIZE];
 
+                    in_len = sizeof(clientaddr);
+
                     csock = accept(ssock, (struct sockaddr*) &clientaddr,
-                        sizeof(clientaddr));
+                        &in_len);
 
                     if (csock == -1){
                         /* No connnections enough */
@@ -137,13 +140,37 @@ int main(){
                 continue;
 
             } else{
-                //TODO READ DATA FROM USER
+
+                /* User write data => we should read it and do anything */
+
+                while(1) {
+                    char buf[BUFFERSIZE];
+                    ssize_t count;
+
+                    count = recv(events[i].data.fd, buf, sizeof(buf), 0);
+
+                    if(count == -1) {
+                        if(errno != EAGAIN){
+                            perror("Problems while reading from client socket");
+                            close(events[i].data.fd);
+                        }
+                        else{
+                            break;
+                        }
+                    }
+
+                    write(1, buf, count);
+                }
+
+
+
             }
         }
     }
 
-
-
+    free(events);
     close(ssock);
     close(efd);
+
+    exit(0);
 }

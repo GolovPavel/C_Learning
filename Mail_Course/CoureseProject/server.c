@@ -21,7 +21,7 @@
 #define BUFFERSIZE 4096
 
 
-void write_log(FILE*, char[]);
+void write_log(FILE*, int, char[], int count);
 
 int main(int argc, char* argv[]){
 
@@ -41,6 +41,9 @@ int main(int argc, char* argv[]){
     int efd;
     struct epoll_event event;
     struct epoll_event *events;
+
+    char port[MAXPORTSIZE];
+    char host[MAXHOSTSIZE];
 
     int status;
 
@@ -156,8 +159,6 @@ int main(int argc, char* argv[]){
                     struct sockaddr_in clientaddr;
                     socklen_t in_len;
                     int csock;
-                    char port[MAXPORTSIZE];
-                    char host[MAXHOSTSIZE];
 
                     in_len = sizeof(clientaddr);
 
@@ -232,7 +233,8 @@ int main(int argc, char* argv[]){
                     int j, outfd;
 
                     for(j = 0; j < n; j++){
-                        if((events[j].data.fd == clfd)) {
+                        if((events[j].data.fd == clfd)
+                        || !(events[j].events & EPOLLOUT)) {
                             continue;
                         }
 
@@ -246,16 +248,36 @@ int main(int argc, char* argv[]){
                         }
                     }
 
-                    write_log(fm, buf);
+                    /* Write data to log */
+
+                    write_log(fm, clfd, buf, count);
                 }
             }
         }
     }
 }
 
-void write_log(FILE* fm, char msg[]){
-    long int ttime;
+void write_log(FILE* fm, int sock, char msg[], int msglen){
+    char host[MAXHOSTSIZE];
+    char port[MAXPORTSIZE];
+    int status;
 
-    ttime = time(NULL);
-    fprintf(fm, "%s%s\n", ctime(&ttime), msg);
+    struct sockaddr claddr;
+    socklen_t cl_len = sizeof(claddr);
+    status = getpeername(sock, &claddr, &cl_len);
+    if(status == -1) {
+        perror("Could not getpeername");
+    }
+    status = getnameinfo(&claddr, sizeof(claddr),
+        host, sizeof(host),
+        port, sizeof(port),
+        NI_NUMERICHOST | NI_NUMERICSERV);
+    if(status == -1) {
+        perror("Could not getnameinfo");
+    }
+
+    long int ttime = time(NULL);
+    fprintf(fm, "Time: %sAddress: %s:%s\nMessage: ", ctime(&ttime), host, port);
+    fwrite(msg, 1, msglen, fm);
+    fprintf(fm, "\n\n");
 }

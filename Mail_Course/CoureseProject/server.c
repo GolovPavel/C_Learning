@@ -42,9 +42,6 @@ int main(int argc, char* argv[]){
     struct epoll_event event;
     struct epoll_event *events;
 
-    char port[MAXPORTSIZE];
-    char host[MAXHOSTSIZE];
-
     int status;
 
     /* Open file for logging */
@@ -156,6 +153,9 @@ int main(int argc, char* argv[]){
 
                 /* Get all new connections */
                 while(1){
+                    char port[MAXPORTSIZE];
+                    char host[MAXHOSTSIZE];
+
                     struct sockaddr_in clientaddr;
                     socklen_t in_len;
                     int csock;
@@ -281,3 +281,4 @@ void write_log(FILE* fm, int sock, char msg[], int msglen){
     fwrite(msg, 1, msglen, fm);
     fprintf(fm, "\n\n");
 }
+

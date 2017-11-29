@@ -133,9 +133,7 @@ int main(int argc, char* argv[]){
 
             /* If error occured or socket is not ready for read */
             if((events[i].events & EPOLLERR)
-                || (events[i].events & EPOLLHUP)
-                || ((!(events[i].events & EPOLLIN))
-                && (!(events[i].events & EPOLLOUT)))) {
+                || (events[i].events & EPOLLHUP)) {
                 printf("Error ocured with socket %d", events[i].data.fd);
                 close(events[i].data.fd);
                 continue;
@@ -167,7 +165,7 @@ int main(int argc, char* argv[]){
 
                     if (csock == -1){
                         /* No connnections enough */
-                        if((errno == EAGAIN) || (errno == EWOULDBLOCK)){
+                        if((errno == EAGAIN)){
                             break;
                         }
                         else {
@@ -180,6 +178,7 @@ int main(int argc, char* argv[]){
                         host, sizeof(host),
                         port, sizeof(port),
                         NI_NUMERICHOST | NI_NUMERICSERV);
+
                     if(status == 0) {
                         printf("Client with fd %d and address %s:%s connected\n",
                             csock, host, port);

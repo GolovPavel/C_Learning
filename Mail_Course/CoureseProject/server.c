@@ -19,7 +19,12 @@
 #define MAXHOSTSIZE 32
 #define MAXPORTSIZE 16
 #define BUFFERSIZE 4096
+#define CYCLEBUFFSIZE 1000000
+#define MAXCLIENTS 100
 
+struct context {
+    int sfd;
+};
 
 void write_log(FILE*, int, char[], int count);
 
@@ -31,6 +36,9 @@ int main(int argc, char* argv[]){
     }
 
     char* filename = argv[1];
+ 
+    struct context* connections[MAXCLIENTS];
+    int conn_size = 0;
 
     int sigfd;
     sigset_t mask;
@@ -145,6 +153,10 @@ int main(int argc, char* argv[]){
                 close(sigfd);
                 close(efd);
                 fclose(fm);
+
+                for(int j = 0; j < conn_size; j++) {
+                    free(connections[j]);
+                }
                 exit(0);
             } else if(ssock == events[i].data.fd) {
                 /* Event occured on listener socket => new connection[s] recieved */
@@ -156,6 +168,7 @@ int main(int argc, char* argv[]){
 
                     struct sockaddr_in clientaddr;
                     socklen_t in_len;
+                    struct context* ctx;
                     int csock;
 
                     in_len = sizeof(clientaddr);
@@ -191,7 +204,14 @@ int main(int argc, char* argv[]){
                         exit(1);
                     }
 
-                    event.data.fd = csock;
+                    ctx = malloc(sizeof(ctx));
+                    ctx -> sfd = csock;
+
+                    connections[conn_size] = ctx;
+                    conn_size++;
+
+                    //event.data.fd = csock;
+                    event.data.ptr = ctx;
                     event.events = EPOLLIN | EPOLLOUT;
 
                     status = epoll_ctl(efd, EPOLL_CTL_ADD, csock, &event);
@@ -199,6 +219,7 @@ int main(int argc, char* argv[]){
                         perror("Could not client ctl epoll");
                         exit(1);
                     }
+
                 }
                 continue;
 
@@ -206,7 +227,8 @@ int main(int argc, char* argv[]){
 
                 /* User write data => we should read it and send to everyone, except this user */
 
-                int clfd = events[i].data.fd;
+                struct context *ctx = (struct context*) events[i].data.ptr;
+                int clfd = ctx -> sfd;
 
                 while(1) {
                     char buf[BUFFERSIZE];
@@ -232,12 +254,17 @@ int main(int argc, char* argv[]){
                     int j, outfd;
 
                     for(j = 0; j < n; j++){
-                        if((events[j].data.fd == clfd)
-                        || !(events[j].events & EPOLLOUT)) {
+
+                        struct context *outctx = (struct context*) events[j].data.ptr;
+                        outfd = outctx -> sfd;
+
+                        printf("%d\n", outfd);
+                        printf("%d\n", j);
+
+                        if((outfd == clfd)
+                            || !(events[j].events & EPOLLOUT)) {
                             continue;
                         }
-
-                        outfd = events[j].data.fd;
 
                         status = send(outfd, buf, count, 0);
 

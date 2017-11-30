@@ -147,7 +147,6 @@ int main(int argc, char* argv[]){
             /* If error occured or socket is not ready for read */
             if((events[i].events & EPOLLERR)
                 || (events[i].events & EPOLLHUP)) {
-                printf("Error ocured with socket %d", events[i].data.fd);
                 if((events[i].data.fd == ssock) || (events[i].data.fd == sigfd)) {
                     close(events[i].data.fd);
                 } else {
@@ -159,6 +158,7 @@ int main(int argc, char* argv[]){
                 /* Ctrl + z => terminate programm */
                 printf("\nServer stoped\n");
                 free(events);
+                shutdown(ssock, 2);
                 close(ssock);
                 close(sigfd);
                 close(efd);
@@ -339,8 +339,6 @@ int main(int argc, char* argv[]){
                                     break;
                                 }
                             }
-                        } else {
-                            continue;
                         }
                     }
 

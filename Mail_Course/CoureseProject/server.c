@@ -13,6 +13,7 @@
 #include <time.h>
 #include <signal.h>
 #include <sys/signalfd.h>
+#include <string.h>
 
 #define MAXCONN 100
 #define MAXEVENTS 64
@@ -251,7 +252,7 @@ int main(int argc, char* argv[]){
                         if(end > start) {
                             size = end - start;
                             if(size < 1024) {
-                                status = send(ctx -> sfd, (ctx -> cbuff)[start], size, 0);
+                                status = send(ctx -> sfd, &(ctx -> cbuff)[start], size, 0);
                                 if(status == -1 || errno == EAGAIN) {
                                     ctx -> writable = 0;
                                     break;
@@ -259,7 +260,7 @@ int main(int argc, char* argv[]){
                                 ctx -> start = (ctx -> start) + status;
                             }
                             else {
-                                status = send(ctx -> sfd, (ctx -> cbuff)[start], 1024, 0);
+                                status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
                                 if(status == -1 || errno == EAGAIN ) {
                                     ctx -> writable = 0;
                                     break;
@@ -270,14 +271,14 @@ int main(int argc, char* argv[]){
                             int edge = CYCLEBUFFSIZE - 1 - (ctx -> start);
 
                             if(edge < 1024) {
-                                status = send(ctx -> sfd, (ctx -> cbuff)[start], edge, 0);
+                                status = send(ctx -> sfd, &(ctx -> cbuff)[start], edge, 0);
                                 if(status == -1 || errno == EAGAIN) {
                                     ctx -> writable = 0;
                                     break;
                                 }
                             ctx -> start = 0;
                             } else {
-                                status = send(ctx -> sfd, (ctx -> cbuff)[start], 1024, 0);
+                                status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
                                 if(status == -1 || errno == EAGAIN ) {
                                     ctx -> writable = 0;
                                     break;
@@ -321,7 +322,7 @@ int main(int argc, char* argv[]){
 
                     for(j = 0; j < conn_size; j++){
                         struct context* ctx = connections[j];
-                        
+
                         if (ctx -> sfd == clfd) {
                             continue;
                         }
@@ -331,14 +332,67 @@ int main(int argc, char* argv[]){
                         int diff = CYCLEBUFFSIZE - end;
 
                         if(diff > count) {
-                            memcpy((ctx -> cbuff)[end], buf, count);
-                            ctx -> end =  
+                            memcpy(&(ctx -> cbuff)[end], buf, count);
+                            ctx -> end = (ctx -> end) + count;
                         } else {
-                            memcpy((ctx -> cbuff)[end], buf, diff);
-                            memcpy(ctx -> cbuff, buff[diff], count - diff);
+                            memcpy(&(ctx -> cbuff)[end], buf, diff);
+                            memcpy(ctx -> cbuff, &buf[diff + 1], count - diff);
+                            ctx -> end = count - diff;
                         }
 
-                        //FLUSh!  
+                        //FLUSH!
+                        if((ctx -> writable) == 1){
+                            while(1){
+                                int start = ctx -> start;
+                                int end = ctx -> end;
+                                int size;
+
+                                if(end != start) {
+                                    if(end > start) {
+                                        size = end - start;
+                                        if(size < 1024) {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], size, 0);
+                                                if(status == -1 || errno == EAGAIN) {
+                                                    ctx -> writable = 0;
+                                                    break;
+                                                }
+                                            ctx -> start = (ctx -> start) + status;
+                                        }
+                                        else {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
+                                            if(status == -1 || errno == EAGAIN ) {
+                                                ctx -> writable = 0;
+                                                break;
+                                            }
+                                            ctx -> start = (ctx -> start) + status;
+                                        }
+                                    } else {
+                                        int edge = CYCLEBUFFSIZE - 1 - (ctx -> start);
+
+                                        if(edge < 1024) {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], edge, 0);
+                                            if(status == -1 || errno == EAGAIN) {
+                                                ctx -> writable = 0;
+                                                break;
+                                            }
+                                            ctx -> start = 0;
+                                        } else {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
+                                            if(status == -1 || errno == EAGAIN ) {
+                                                ctx -> writable = 0;
+                                                break;
+                                            }
+                                            ctx -> start = (ctx -> start) + status;
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        else {
+                            continue;
+                        }
                     }
 
                     /* Write data to log */

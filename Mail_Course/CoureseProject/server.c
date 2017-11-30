@@ -141,6 +141,7 @@ int main(int argc, char* argv[]){
                 /* Ctrl + z => terminate programm */
                 printf("\nServer stoped\n");
                 free(events);
+                shutdown(ssock, SHUT_RDWR);
                 close(ssock);
                 close(sigfd);
                 close(efd);

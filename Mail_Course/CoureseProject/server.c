@@ -25,7 +25,6 @@
 
 struct context {
     int sfd;
-    int pos;
     int end;
     int start;
     int writable;
@@ -119,7 +118,7 @@ int main(int argc, char* argv[]){
     efd = epoll_create1(0);
 
     event.data.fd = ssock;
-    event.events = EPOLLIN || EPOLLET;
+    event.events = EPOLLIN | EPOLLET;
     status = epoll_ctl(efd, EPOLL_CTL_ADD, ssock, &event);
     if(status == -1){
         perror("Could not server ctl epoll");
@@ -127,7 +126,7 @@ int main(int argc, char* argv[]){
     }
 
     event.data.fd = sigfd;
-    event.events = EPOLLIN || EPOLLET;
+    event.events = EPOLLIN | EPOLLET;
     status = epoll_ctl(efd, EPOLL_CTL_ADD, sigfd, &event);
     if(status == -1){
         perror("Could not signal ctl epoll");
@@ -155,7 +154,6 @@ int main(int argc, char* argv[]){
                     struct context *ctx = (struct context*) events[i].data.ptr;
                     close(ctx -> sfd);
                 }
-                close(events[i].data.fd);
                 continue;
             } else if(sigfd == events[i].data.fd) {
                 /* Ctrl + z => terminate programm */
@@ -219,7 +217,6 @@ int main(int argc, char* argv[]){
                     ctx = malloc(sizeof(ctx));
                     ctx -> sfd = csock;
                     ctx -> writable = 0;
-                    ctx -> pos = 0;
                     ctx -> end = 0;
                     ctx -> start = 0;
 
@@ -228,7 +225,7 @@ int main(int argc, char* argv[]){
 
                     //event.data.fd = csock;
                     event.data.ptr = ctx;
-                    event.events = EPOLLIN | EPOLLOUT;
+                    event.events = EPOLLIN | EPOLLOUT | EPOLLET;
 
                     status = epoll_ctl(efd, EPOLL_CTL_ADD, csock, &event);
                     if(status == -1){
@@ -239,7 +236,120 @@ int main(int argc, char* argv[]){
                 }
                 continue;
 
-            } else if(events[i].events & EPOLLOUT) {
+            }
+
+            if(events[i].events & EPOLLIN){
+
+                /* User write data => we should read it and send to everyone, except this user */
+
+                struct context *ctx = (struct context*) events[i].data.ptr;
+                int clfd = ctx -> sfd;
+                printf("EPOLLIN %d\n", clfd);
+
+                while(1) {
+                    char buf[BUFFERSIZE];
+                    int count;
+
+                    count = recv(clfd, buf, sizeof(buf), 0);
+
+                    /* Some error? */
+                    if(count == -1) {
+                        /* errno == EAGAIN means, that we don't have any data */
+                        if(errno != EAGAIN){
+                            perror("Problems while reading from client socket");
+                            close(clfd);
+                        } else{
+                            break;
+                        }
+                    } else if(count == 0) {
+                        /* Client shotdown */
+                        close(clfd);
+                    }
+
+                    /* Write data to other sockets */
+                    int j;
+                    for(j = 0; j < conn_size; j++){
+                        struct context* ctx = connections[j];
+
+                        if (ctx -> sfd == clfd) {
+                            continue;
+                        }
+
+                        /* Write data to cycle buffer */
+                        int end = ctx -> end;
+                        int diff = CYCLEBUFFSIZE - end;
+
+                        if(diff > count) {
+                            memcpy(&(ctx -> cbuff)[end], buf, count);
+                            ctx -> end = (ctx -> end) + count;
+                        } else {
+                            memcpy(&(ctx -> cbuff)[end], buf, diff);
+                            memcpy(ctx -> cbuff, &buf[diff + 1], count - diff);
+                            ctx -> end = count - diff;
+                        }
+
+                        //FLUSH!
+                        if((ctx -> writable) == 1){
+                            while(1){
+                                int start = ctx -> start;
+                                int end = ctx -> end;
+                                int size;
+                                printf("%d, %d\n", start, end);
+
+
+                                if(end != start) {
+                                    if(end > start) {
+                                        size = end - start;
+                                        if(size < 1024) {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], size, 0);
+                                            if(status == -1 || errno == EAGAIN) {
+                                                ctx -> writable = 0;
+                                                break;
+                                            }
+                                            ctx -> start = (ctx -> start) + status;
+                                        }
+                                        else {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
+                                            if(status == -1 || errno == EAGAIN ) {
+                                                ctx -> writable = 0;
+                                                break;
+                                            }
+                                            ctx -> start = (ctx -> start) + status;
+                                        }
+                                    } else {
+                                        int edge = CYCLEBUFFSIZE - 1 - (ctx -> start);
+
+                                        if(edge < 1024) {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], edge, 0);
+                                            if(status == -1 || errno == EAGAIN) {
+                                                ctx -> writable = 0;
+                                                break;
+                                            }
+                                        ctx -> start = 0;
+                                        } else {
+                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
+                                            if(status == -1 || errno == EAGAIN ) {
+                                                ctx -> writable = 0;
+                                                break;
+                                            }
+                                            ctx -> start = (ctx -> start) + status;
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    /* Write data to log */
+
+                    write_log(fm, clfd, buf, count);
+                }
+            }
+            if(events[i].events & EPOLLOUT) {
                 struct context* ctx = (struct context*) events[i].data.ptr;
                 ctx -> writable = 1;
 
@@ -247,8 +357,10 @@ int main(int argc, char* argv[]){
                     int start = ctx -> start;
                     int end = ctx -> end;
                     int size;
+                    printf("%d, %d\n", start, end);
 
-                    if(end != start) {
+
+                    if(end != start){
                         if(end > start) {
                             size = end - start;
                             if(size < 1024) {
@@ -289,115 +401,6 @@ int main(int argc, char* argv[]){
                     } else {
                         break;
                     }
-                }
-            } else if(events[i].events & EPOLLIN){
-
-                /* User write data => we should read it and send to everyone, except this user */
-
-                struct context *ctx = (struct context*) events[i].data.ptr;
-                int clfd = ctx -> sfd;
-
-                while(1) {
-                    char buf[BUFFERSIZE];
-                    int count;
-
-                    count = recv(clfd, buf, sizeof(buf), 0);
-
-                    /* Some error? */
-                    if(count == -1) {
-                        /* errno == EAGAIN means, that we don't have any data */
-                        if(errno != EAGAIN){
-                            perror("Problems while reading from client socket");
-                            close(clfd);
-                        } else{
-                            break;
-                        }
-                    } else if(count == 0) {
-                        /* Client shotdown */
-                        close(clfd);
-                    }
-
-                    /* Write data to other sockets */
-                    int j, outfd;
-
-                    for(j = 0; j < conn_size; j++){
-                        struct context* ctx = connections[j];
-
-                        if (ctx -> sfd == clfd) {
-                            continue;
-                        }
-
-                        /* Write data to cycle buffer */
-                        int end = ctx -> end;
-                        int diff = CYCLEBUFFSIZE - end;
-
-                        if(diff > count) {
-                            memcpy(&(ctx -> cbuff)[end], buf, count);
-                            ctx -> end = (ctx -> end) + count;
-                        } else {
-                            memcpy(&(ctx -> cbuff)[end], buf, diff);
-                            memcpy(ctx -> cbuff, &buf[diff + 1], count - diff);
-                            ctx -> end = count - diff;
-                        }
-
-                        //FLUSH!
-                        if((ctx -> writable) == 1){
-                            while(1){
-                                int start = ctx -> start;
-                                int end = ctx -> end;
-                                int size;
-
-                                if(end != start) {
-                                    if(end > start) {
-                                        size = end - start;
-                                        if(size < 1024) {
-                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], size, 0);
-                                                if(status == -1 || errno == EAGAIN) {
-                                                    ctx -> writable = 0;
-                                                    break;
-                                                }
-                                            ctx -> start = (ctx -> start) + status;
-                                        }
-                                        else {
-                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
-                                            if(status == -1 || errno == EAGAIN ) {
-                                                ctx -> writable = 0;
-                                                break;
-                                            }
-                                            ctx -> start = (ctx -> start) + status;
-                                        }
-                                    } else {
-                                        int edge = CYCLEBUFFSIZE - 1 - (ctx -> start);
-
-                                        if(edge < 1024) {
-                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], edge, 0);
-                                            if(status == -1 || errno == EAGAIN) {
-                                                ctx -> writable = 0;
-                                                break;
-                                            }
-                                            ctx -> start = 0;
-                                        } else {
-                                            status = send(ctx -> sfd, &(ctx -> cbuff)[start], 1024, 0);
-                                            if(status == -1 || errno == EAGAIN ) {
-                                                ctx -> writable = 0;
-                                                break;
-                                            }
-                                            ctx -> start = (ctx -> start) + status;
-                                        }
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                        else {
-                            continue;
-                        }
-                    }
-
-                    /* Write data to log */
-
-                    write_log(fm, clfd, buf, count);
                 }
             }
         }

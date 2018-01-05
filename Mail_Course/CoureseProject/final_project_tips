@@ -1,0 +1,63 @@
+EPOLLOUT 
+	Пишем из буфера до момента EWOLDBLOCK - окно закончилось
+	EDGETRIGGREED заводим в контексте внутри епола флажок bool writable = true/false
+	Пришло сообщение - пишем в буферы => flush
+	while (writable) {
+		rc = write(по 1024 байт);
+		if(rc == -1 and errno == EWOLDBLOCK){
+			writable = false;
+		}
+		Если в буффере больше данных нет то выйти из цикла.	
+	}
+
+Обработка EPOLLOUT 
+
+EPOLLIN LISTENER SOCKET
+	В EDGE TRIGGERED Нужен цикли по accept, в level не нужен
+	
+
+В контексте:
+	Циклобуфер
+	Writable bool
+	Айдишник сокета
+
+
+Циклобуфер:
+Массив
+Указатели на начало и конец
+Ошибка - до записи end был < begin => после записи он тоже должен быть < begina 
+
+
+
+#include "list.h"
+ 
+static List* list_new(int val) {
+	List *list = (List*)malloc(sizeof(List));
+ 	list->val = val;
+ 	list->next = NULL;
+ 	return list;
+}
+ 
+void list_add(List **list, int val) {
+ 	for(; *list != NULL; list = &(*list)->next);
+ 	*list = list_new(val);
+}
+ 
+void list_node_del(List **node) {
+ 	free(*node);
+ 	(*node) = (*node)->next;
+ }
+ 
+ void list_del_by_value(List **list, int val) {
+ 	for(; *list != NULL; list = &(*list)->next) {
+ 		if((*list)->val == val) {
+ 			list_node_del(list);
+ 			break;
+ 		}
+ 	}
+}
+ 
+ void list_free(List *list) {
+ 	for(; list != NULL; list = list->next)
+ 		free(list);
+ }
